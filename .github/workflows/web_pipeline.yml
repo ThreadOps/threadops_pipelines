@@ -284,6 +284,14 @@ jobs:
             echo "::error::Secret VERCEL_TOKEN is not set in GitHub Environment 'development'."
             exit 1
           fi
+          if [ -z "$VERCEL_ORG_ID" ]; then
+            echo "::error::Secret VERCEL_ORG_ID is not set in GitHub Environment 'development'."
+            exit 1
+          fi
+          if [ -z "$VERCEL_PROJECT_ID" ]; then
+            echo "::error::Secret VERCEL_PROJECT_ID is not set in GitHub Environment 'development'."
+            exit 1
+          fi
           npx vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
           npx vercel build --prod --token="$VERCEL_TOKEN"
           npx vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
