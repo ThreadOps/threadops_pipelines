@@ -1,0 +1,175 @@
+name: Prod_Backend_ThreadOps
+
+# Manual-only production promotion gate for the Backend.
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Git SHA to promote (leave blank to deploy the newest commit on main that PASSED backend CI)"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prod-deploy-backend
+  cancel-in-progress: false
+
+jobs:
+  verify_green:
+    name: ✅ Verify Backend Testing Passed For This SHA
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      packages: read
+    outputs:
+      target_sha: ${{ steps.resolve_sha.outputs.target_sha }}
+    env:
+      DOCKER_CLI_EXPERIMENTAL: enabled
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Resolve Target SHA
+        id: resolve_sha
+        env:
+          RAW_INPUT: ${{ inputs.image_tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "$RAW_INPUT" ]; then
+            case "$RAW_INPUT" in
+              *[!0-9a-fA-F]*) echo "::error::image_tag must be a hex git SHA, got: ${RAW_INPUT}"; exit 1 ;;
+            esac
+            if [ "${#RAW_INPUT}" -lt 7 ] || [ "${#RAW_INPUT}" -gt 40 ]; then
+              echo "::error::image_tag must be 7-40 hex characters, got ${#RAW_INPUT}."
+              exit 1
+            fi
+            TARGET_SHA="$RAW_INPUT"
+          else
+            TARGET_SHA=$(gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/backend_pipeline.yml/runs?event=push&status=success&branch=main&per_page=1" \
+              --jq '.workflow_runs[0].head_sha // empty')
+            if [ -z "$TARGET_SHA" ]; then
+              echo "::error::No successful push run of backend_pipeline.yml exists on main. Nothing is eligible for promotion."
+              exit 1
+            fi
+            echo "No image_tag provided; deploying newest backend-tested commit on main: ${TARGET_SHA}"
+          fi
+          echo "target_sha=${TARGET_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Confirm SHA is actually on main
+        env:
+          TARGET_SHA: ${{ steps.resolve_sha.outputs.target_sha }}
+        run: |
+          if ! git merge-base --is-ancestor "$TARGET_SHA" origin/main; then
+            echo "::error::${TARGET_SHA} is not an ancestor of main. Refusing to promote a commit that was never merged."
+            exit 1
+          fi
+
+      - name: Verify backend_pipeline.yml succeeded for this SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ steps.resolve_sha.outputs.target_sha }}
+        run: |
+          COUNT=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/backend_pipeline.yml/runs?head_sha=${TARGET_SHA}&event=push&status=success" \
+            --jq '.workflow_runs | length')
+          if [ "${COUNT:-0}" -lt 1 ]; then
+            echo "::error::No successful push run of backend_pipeline.yml found for ${TARGET_SHA}."
+            exit 1
+          fi
+          echo "backend_pipeline.yml: ${COUNT} successful push run(s) found."
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Confirm the backend GHCR image exists for this SHA
+        env:
+          TARGET_SHA: ${{ steps.resolve_sha.outputs.target_sha }}
+        run: |
+          docker manifest inspect "ghcr.io/${{ github.repository_owner }}/threadops-backend:${TARGET_SHA}" > /dev/null
+          echo "Backend GHCR image confirmed present for ${TARGET_SHA}."
+
+  deploy:
+    name: 🚀 Deploy Backend To Production VPS (Coolify)
+    needs: verify_green
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: production
+      url: https://${{ vars.PROD_DOMAIN || 'app.threadops.in' }}
+    permissions:
+      contents: read
+      packages: write
+    env:
+      BACKEND_REPO: ghcr.io/${{ github.repository_owner }}/threadops-backend
+      SHA: ${{ needs.verify_green.outputs.target_sha }}
+      DOCKER_CLI_EXPERIMENTAL: enabled
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Snapshot current backend :production as :production-previous
+      - name: Snapshot current backend :production as :production-previous
+        run: |
+          if docker manifest inspect "${BACKEND_REPO}:production" > /dev/null 2>&1; then
+            docker buildx imagetools create --tag "${BACKEND_REPO}:production-previous" "${BACKEND_REPO}:production"
+            echo "Snapshotted ${BACKEND_REPO}:production -> ${BACKEND_REPO}:production-previous"
+          else
+            echo "No existing ${BACKEND_REPO}:production tag — first deploy, nothing to snapshot."
+          fi
+
+      # Retag backend :production -> target SHA
+      - name: Retag backend :production -> ${{ needs.verify_green.outputs.target_sha }}
+        run: |
+          docker buildx imagetools create --tag "${BACKEND_REPO}:production" "${BACKEND_REPO}:${SHA}"
+          echo "### Promoting backend ${SHA} to production" >> "$GITHUB_STEP_SUMMARY"
+
+      # Trigger Coolify deployment webhook
+      - name: Trigger Coolify deploy (Backend-PROD)
+        env:
+          COOLIFY_WEBHOOK: ${{ secrets.COOLIFY_WEBHOOK_BACKEND }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+        run: |
+          if [ -z "$COOLIFY_WEBHOOK" ]; then
+            echo "::error::Secret COOLIFY_WEBHOOK_BACKEND is not set in GitHub Environment 'production'."
+            exit 1
+          fi
+          if [ -n "$COOLIFY_TOKEN" ]; then
+            curl --fail --silent --show-error --request POST "$COOLIFY_WEBHOOK" \
+              --header "Authorization: Bearer ${COOLIFY_TOKEN}"
+          else
+            curl --fail --silent --show-error --request POST "$COOLIFY_WEBHOOK"
+          fi
+          echo "Coolify deployment triggered successfully."
+
+      - name: Summary
+        run: |
+          {
+            echo "### ✅ Backend Production Deployed to Coolify"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| SHA | \`${SHA}\` |"
+            echo "| Backend image | \`${BACKEND_REPO}:production\` (-> ${SHA}) |"
+            echo "| Target resource | Coolify \`Backend-PROD\` |"
+            echo "| Status | Webhook triggered |"
+          } >> "$GITHUB_STEP_SUMMARY"

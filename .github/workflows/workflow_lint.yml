@@ -1,0 +1,40 @@
+name: 0_Workflow_Lint
+
+# Nothing else validates .github/workflows/**. The two production promotion workflows are
+# workflow_dispatch-only, so before this existed a syntax error or a bad expression in either was
+# only discovered by a human trying to promote to production. actionlint also flags shell issues
+# in `run:` blocks (via shellcheck) and untrusted `${{ }}` interpolation into scripts.
+on:
+  # push:
+  #   branches:
+  #     - main
+  #   paths:
+  #     - '.github/workflows/**'
+  #     - '.github/dependabot.yml'
+  # pull_request:
+  #   branches:
+  #     - main
+  #   paths:
+  #     - '.github/workflows/**'
+  #     - '.github/dependabot.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  actionlint:
+    name: 🔎 actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Run actionlint
+        run: |
+          docker run --rm -v "${PWD}:/repo" -w /repo rhysd/actionlint:latest -color
