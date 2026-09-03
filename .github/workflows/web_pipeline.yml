@@ -2,20 +2,8 @@ name: 0_Frontend_Test
 
 # Validates frontend code, runs E2E tests, deploys to Vercel (Testing), and publishes image to GHCR on main.
 on:
-  # push:
-  #   branches:
-  #     - main
-  #   paths:
-  #     - 'web/**'
-  #     - 'e2e/**'
-  #     - '.github/workflows/web_pipeline.yml'
-  # pull_request:
-  #   branches:
-  #     - main
-  #   paths:
-  #     - 'web/**'
-  #     - 'e2e/**'
-  #     - '.github/workflows/web_pipeline.yml'
+  repository_dispatch:
+    types: [deploy-test]
   workflow_dispatch:
 
 env:
@@ -35,6 +23,8 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
+          repository: aswinronald27/ThreadOps
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           fetch-depth: 0
           ref: ${{ github.ref }}
       - name: Fetch Version
@@ -54,6 +44,8 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
+          repository: aswinronald27/ThreadOps
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           ref: ${{ github.ref }}
       - uses: actions/setup-node@v4
         with:
@@ -79,6 +71,8 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
+          repository: aswinronald27/ThreadOps
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           ref: ${{ github.ref }}
       - uses: actions/setup-node@v4
         with:
@@ -256,6 +250,8 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
+          repository: aswinronald27/ThreadOps
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           ref: ${{ github.ref }}
       - uses: actions/setup-node@v4
         with:
@@ -280,6 +276,8 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
+          repository: aswinronald27/ThreadOps
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           fetch-depth: 0
           ref: ${{ github.ref }}
       - name: Deploy Frontend to Vercel (Test Environment)
@@ -320,6 +318,8 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
+          repository: aswinronald27/ThreadOps
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           ref: ${{ github.ref }}
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
