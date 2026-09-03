@@ -5,9 +5,6 @@ on:
     types: [deploy-test]
   workflow_dispatch:
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE20: 'true'
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -22,7 +19,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          repository: aswinronald27/ThreadOps
+          repository: ThreadOps/threadops
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           fetch-depth: 0
           ref: ${{ github.ref }}
@@ -43,7 +40,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          repository: aswinronald27/ThreadOps
+          repository: ThreadOps/threadops
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           ref: ${{ github.ref }}
       - name: Set up JDK 25
@@ -73,7 +70,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          repository: aswinronald27/ThreadOps
+          repository: ThreadOps/threadops
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           ref: ${{ github.ref }}
       - name: Set up JDK 25
@@ -103,7 +100,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          repository: aswinronald27/ThreadOps
+          repository: ThreadOps/threadops
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           ref: ${{ github.ref }}
       - name: Set up JDK 25
@@ -127,7 +124,7 @@ jobs:
   deploy_testing:
     name: 🚀 Deploy Testing
     needs: coverage_gate
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: development
@@ -137,7 +134,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          repository: aswinronald27/ThreadOps
+          repository: ThreadOps/threadops
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           ref: ${{ github.ref }}
       - name: Trigger Render Deploy (Backend Testing)
@@ -174,7 +171,7 @@ jobs:
   build_push_image:
     name: 📦 Build & Push Backend Image (GHCR)
     needs: coverage_gate
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -184,7 +181,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          repository: aswinronald27/ThreadOps
+          repository: ThreadOps/threadops
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           ref: ${{ github.ref }}
       - name: Set up Docker Buildx
@@ -201,7 +198,7 @@ jobs:
           context: ./backend
           target: runtime
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/threadops-backend:${{ github.sha }}
+          tags: ghcr.io/threadops/threadops-backend:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Summary
@@ -209,8 +206,84 @@ jobs:
           {
             echo "### Backend Image Published"
             echo ""
-            echo "\`ghcr.io/${{ github.repository_owner }}/threadops-backend:${{ github.sha }}\`"
+            echo "\`ghcr.io/threadops/threadops-backend:${{ github.sha }}\`"
             echo ""
-            echo "Not deployed anywhere yet. Promote to production with a manual"
-            echo "\`workflow_dispatch\` run of \`deploy-production-backend.yml\` using this SHA."
+            echo "Waiting at the \`deploy_prod\` job for a Review Deployments approval"
+            echo "against the \`production\` environment before this SHA goes live."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy_prod:
+    name: 🛡️ Deploy Backend To Production (Coolify)
+    needs: [build_push_image, deploy_testing]
+    if: (github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch') && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Required reviewers on this environment are what makes the pipeline pause
+    # here and wait for a "Review Deployments" approval before continuing.
+    environment:
+      name: production
+      url: https://${{ vars.PROD_DOMAIN || 'app.threadops.in' }}
+    permissions:
+      contents: read
+      packages: write
+    env:
+      BACKEND_REPO: ghcr.io/threadops/threadops-backend
+      # The image build_push_image just pushed in this same run — no need to
+      # re-resolve or re-verify a SHA the way the old standalone promotion
+      # workflow did, since deploy_prod only runs after that job succeeded.
+      SHA: ${{ github.sha }}
+      DOCKER_CLI_EXPERIMENTAL: enabled
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Snapshot current backend :production as :production-previous
+        run: |
+          if docker manifest inspect "${BACKEND_REPO}:production" > /dev/null 2>&1; then
+            docker buildx imagetools create --tag "${BACKEND_REPO}:production-previous" "${BACKEND_REPO}:production"
+            echo "Snapshotted ${BACKEND_REPO}:production -> ${BACKEND_REPO}:production-previous"
+          else
+            echo "No existing ${BACKEND_REPO}:production tag — first deploy, nothing to snapshot."
+          fi
+
+      - name: Retag backend :production -> ${{ github.sha }}
+        run: |
+          docker buildx imagetools create --tag "${BACKEND_REPO}:production" "${BACKEND_REPO}:${SHA}"
+          echo "### Promoting backend ${SHA} to production" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Trigger Coolify deploy (Backend-PROD)
+        env:
+          COOLIFY_WEBHOOK: ${{ secrets.COOLIFY_WEBHOOK_BACKEND }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+        run: |
+          if [ -z "$COOLIFY_WEBHOOK" ]; then
+            echo "::error::Secret COOLIFY_WEBHOOK_BACKEND is not set in GitHub Environment 'production'."
+            exit 1
+          fi
+          if [ -n "$COOLIFY_TOKEN" ]; then
+            curl --fail --silent --show-error --request POST "$COOLIFY_WEBHOOK" \
+              --header "Authorization: Bearer ${COOLIFY_TOKEN}"
+          else
+            curl --fail --silent --show-error --request POST "$COOLIFY_WEBHOOK"
+          fi
+          echo "Coolify deployment triggered successfully."
+
+      - name: Summary
+        run: |
+          {
+            echo "### ✅ Backend Production Deployed to Coolify"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| SHA | \`${SHA}\` |"
+            echo "| Backend image | \`${BACKEND_REPO}:production\` (-> ${SHA}) |"
+            echo "| Target resource | Coolify \`Backend-PROD\` |"
+            echo "| Status | Webhook triggered |"
           } >> "$GITHUB_STEP_SUMMARY"
