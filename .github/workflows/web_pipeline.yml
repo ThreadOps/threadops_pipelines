@@ -235,33 +235,11 @@ jobs:
   #         echo "===== backend.log ====="; tail -n 200 "${{ runner.temp }}/backend.log"  || true
   #         echo "===== frontend.log ====="; tail -n 100 "${{ runner.temp }}/frontend.log" || true
 
-  build_web:
-    name: 🏗️ Web Build
-    needs: [lint, unit_test]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          repository: ThreadOps/threadops
-          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
-          ref: ${{ github.ref }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: 'web/package-lock.json'
-      - name: Install Dependencies
-        working-directory: ./web
-        run: npm ci
-      - name: Build Web Application
-        working-directory: ./web
-        run: npm run build
+
 
   deploy_testing:
     name: 🚀 Deploy Test
-    needs: [build_web] # e2e_journey dropped while it's commented out above
+    needs: [lint, unit_test] # e2e_journey dropped while it's commented out above
     if: (github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -309,7 +287,7 @@ jobs:
 
   build_push_image:
     name: 📦 Docker Image
-    needs: [build_web] # e2e_journey dropped while it's commented out above
+    needs: [lint, unit_test] # e2e_journey dropped while it's commented out above
     if: (github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
