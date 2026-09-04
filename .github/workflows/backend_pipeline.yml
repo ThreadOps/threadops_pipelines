@@ -14,7 +14,7 @@ jobs:
       version: ${{ steps.get_version.outputs.version }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ThreadOps/threadops
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
@@ -35,7 +35,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ThreadOps/threadops
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
@@ -85,7 +85,7 @@ jobs:
       TESTING_HEALTH_URL: https://threadops-cebn.onrender.com/actuator/health
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ThreadOps/threadops
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
@@ -132,7 +132,7 @@ jobs:
       packages: write
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ThreadOps/threadops
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
