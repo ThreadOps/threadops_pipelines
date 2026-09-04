@@ -41,7 +41,7 @@ jobs:
           repository: ThreadOps/threadops
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           ref: ${{ github.ref }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: 'npm'
@@ -68,7 +68,7 @@ jobs:
           repository: ThreadOps/threadops
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           ref: ${{ github.ref }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: 'npm'
@@ -125,7 +125,7 @@ jobs:
   #         distribution: 'temurin'
   #         cache: 'maven'
   #
-  #     - uses: actions/setup-node@v4
+  #     - uses: actions/setup-node@v7
   #       with:
   #         node-version: '22'
   #         cache: 'npm'
