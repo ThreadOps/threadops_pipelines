@@ -239,7 +239,7 @@ jobs:
   #         echo "===== frontend.log ====="; tail -n 100 "${{ runner.temp }}/frontend.log" || true
 
   build_web:
-    name: 🏗️ Production Build
+    name: 🏗️ Web Build
     needs: [lint, unit_test]
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -263,7 +263,7 @@ jobs:
         run: npm run build
 
   deploy_testing:
-    name: 🚀 Deploy Testing
+    name: 🚀 Deploy Test
     needs: [build_web] # e2e_journey dropped while it's commented out above
     if: (github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -311,7 +311,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   build_push_image:
-    name: 📦 Build & Push Frontend Image (GHCR)
+    name: 📦 Docker Image
     needs: [build_web] # e2e_journey dropped while it's commented out above
     if: (github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -355,7 +355,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   deploy_prod:
-    name: 🛡️ Deploy Frontend To Production (Coolify)
+    name: 🚀 Deploy Prod
     needs: [build_push_image, deploy_testing]
     if: (github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
