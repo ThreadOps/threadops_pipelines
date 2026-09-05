@@ -1,5 +1,10 @@
 name: 0_Frontend_Test
 
+run-name: >-
+  ${{ github.event_name == 'repository_dispatch'
+      && format('{0} ({1})', github.event.client_payload.message, github.event.client_payload.sha)
+      || github.workflow }}
+
 # Validates frontend code, runs E2E tests, deploys to Vercel (Testing), and publishes image to GHCR on main.
 on:
   repository_dispatch:
