@@ -84,6 +84,16 @@ jobs:
             echo "::error::Secret COOLIFY_WEBHOOK_BACKEND is not available to environment 'production-direct'."
             exit 1
           fi
+          # A pasted secret often carries a trailing newline, spaces or quotes, which curl rejects.
+          COOLIFY_WEBHOOK=$(printf '%s' "$COOLIFY_WEBHOOK" | tr -d "\r\n\"' ")
+          COOLIFY_TOKEN=$(printf '%s' "$COOLIFY_TOKEN" | tr -d "\r\n\"' ")
+          case "$COOLIFY_WEBHOOK" in
+            https://*|http://*) ;;
+            *)
+              echo "::error::COOLIFY_WEBHOOK_BACKEND must be the full Deploy Webhook URL starting with https:// (got ${#COOLIFY_WEBHOOK} chars that do not)."
+              exit 1
+              ;;
+          esac
           if [ -n "$COOLIFY_TOKEN" ]; then
             curl --fail --silent --show-error --request POST "$COOLIFY_WEBHOOK" \
               --header "Authorization: Bearer ${COOLIFY_TOKEN}"
