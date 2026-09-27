@@ -1,0 +1,73 @@
+name: 1_Frontend_Deploy_Prod_Direct
+
+run-name: Frontend direct prod deploy (${{ inputs.ref }})
+
+# Manual escape hatch: builds the given ThreadOps ref and ships it straight to Cloudflare Pages.
+# Skips lint, tests, E2E, the testing deploy and the production approval gate — use 0_Frontend_Test for the gated path.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'ThreadOps branch, tag or commit SHA to deploy'
+        required: true
+        default: 'main'
+
+concurrency:
+  group: frontend-production
+  cancel-in-progress: false
+
+jobs:
+  deploy_prod_direct:
+    name: 🚀 Deploy Prod (direct)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # No required reviewers on this environment, so the job never pauses for approval.
+    environment:
+      name: production-direct
+      url: https://${{ vars.PROD_DOMAIN || 'app.threadops.in' }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          repository: ThreadOps/threadops
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          ref: ${{ inputs.ref }}
+
+      - name: Resolve SHA
+        id: resolve
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build Frontend
+        working-directory: web
+        env:
+          VITE_API_URL: https://api.threadops.in/api/v1
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy web/dist --project-name=threadops-frontend --branch=main --commit-hash=${{ steps.resolve.outputs.sha }}
+
+      - name: Summary
+        env:
+          SHA: ${{ steps.resolve.outputs.sha }}
+        run: |
+          {
+            echo "### ⚡ Frontend Deployed Directly to Production (no tests, no approval)"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| SHA | \`${SHA}\` |"
+            echo "| Target | Cloudflare Pages \`threadops-frontend\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
