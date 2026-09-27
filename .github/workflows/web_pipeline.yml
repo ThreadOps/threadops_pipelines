@@ -8,7 +8,7 @@ run-name: >-
 # Validates frontend code, runs E2E tests, deploys to Vercel (Testing), and publishes image to GHCR on main.
 on:
   repository_dispatch:
-    types: [deploy-test]
+    types: [deploy-frontend-test]
   workflow_dispatch:
 
 

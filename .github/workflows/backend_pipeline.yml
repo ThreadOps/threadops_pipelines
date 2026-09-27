@@ -7,7 +7,7 @@ run-name: >-
 
 on:
   repository_dispatch:
-    types: [deploy-test]
+    types: [deploy-backend-test]
   workflow_dispatch:
 
 
