@@ -79,7 +79,7 @@ jobs:
           name: backend-jar
           path: ./dist
 
-      - name: Deploy JAR to Oracle Cloud Test Server
+      - name: Deploy JAR and verify health on Test Server
         env:
           SSH_KEY: ${{ secrets.OCI_SSH_KEY }}
           HOST: ${{ secrets.TEST_SERVER_HOST }}
@@ -88,20 +88,22 @@ jobs:
           printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           scp -o StrictHostKeyChecking=no ./dist/api-*.jar ubuntu@$HOST:/home/ubuntu/threadops/app.jar
-          ssh -o StrictHostKeyChecking=no ubuntu@$HOST "cd /home/ubuntu/threadops && sudo docker compose up -d --build"
-
-      - name: Wait for testing to report healthy
-        run: |
-          elapsed=0
-          until curl --fail --silent --max-time 10 "$TESTING_HEALTH_URL" | grep -q '"status":"UP"'; do
-            if [ "$elapsed" -ge 300 ]; then
-              echo "::error::Testing did not report healthy at ${TESTING_HEALTH_URL} within 300s."
-              exit 1
-            fi
-            sleep 10
-            elapsed=$((elapsed + 10))
-          done
-          echo "Testing healthy after ${elapsed}s."
+          ssh -o StrictHostKeyChecking=no ubuntu@$HOST '
+            cd /home/ubuntu/threadops
+            sudo docker compose up -d --build
+            echo "Waiting for backend to report healthy..."
+            elapsed=0
+            until sudo docker exec threadops-caddy wget -qO- http://backend:8080/actuator/health 2>/dev/null | grep -q "UP"; do
+              if [ $elapsed -ge 300 ]; then
+                echo "::error::Backend did not report UP within 300s."
+                sudo docker logs --tail 50 threadops-backend
+                exit 1
+              fi
+              sleep 10
+              elapsed=$((elapsed + 10))
+            done
+            echo "Backend is healthy after ${elapsed}s."
+          '
 
       - name: Summary
         run: |
@@ -234,7 +236,7 @@ jobs:
           name: backend-jar
           path: ./dist-backup
 
-      - name: Deploy JAR to Oracle Cloud Backup Standby Server
+      - name: Deploy JAR and verify health on Backup Standby Server
         if: env.BACKUP_SERVER_HOST != ''
         env:
           SSH_KEY: ${{ secrets.OCI_SSH_KEY }}
@@ -244,7 +246,22 @@ jobs:
           printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           scp -o StrictHostKeyChecking=no ./dist-backup/api-*.jar ubuntu@$HOST:/home/ubuntu/threadops/app.jar
-          ssh -o StrictHostKeyChecking=no ubuntu@$HOST "cd /home/ubuntu/threadops && sudo docker compose up -d --build"
+          ssh -o StrictHostKeyChecking=no ubuntu@$HOST '
+            cd /home/ubuntu/threadops
+            sudo docker compose up -d --build
+            echo "Waiting for backup backend to report healthy..."
+            elapsed=0
+            until sudo docker exec threadops-caddy wget -qO- http://backend:8080/actuator/health 2>/dev/null | grep -q "UP"; do
+              if [ $elapsed -ge 300 ]; then
+                echo "::error::Backup backend did not report UP within 300s."
+                sudo docker logs --tail 50 threadops-backend
+                exit 1
+              fi
+              sleep 10
+              elapsed=$((elapsed + 10))
+            done
+            echo "Backup backend is healthy after ${elapsed}s."
+          '
 
       - name: Summary
         run: |
