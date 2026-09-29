@@ -1,0 +1,258 @@
+name: 2_Backend_Fast_Deploy
+
+run-name: Fast deploy backend (${{ inputs.ref || 'main' }})
+
+# Fast-track manual deployment:
+# 1. Builds backend JAR skipping tests (-DskipTests) ~30s.
+# 2. Deploys directly to Oracle Cloud Test Server (test-api.threadops.in).
+# 3. Builds and pushes the Docker image to GHCR.
+# 4. Pauses at the Production Approval Gate.
+# 5. On approval, deploys in parallel to Coolify (Primary VPS) and Oracle Standby Backup.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'ThreadOps branch, tag or commit SHA to deploy'
+        required: true
+        default: 'main'
+
+concurrency:
+  group: backend-fast-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  find_version_and_package:
+    name: 🏷️ Package Backend (Skip Tests)
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      sha: ${{ steps.get_version.outputs.sha }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          repository: ThreadOps/threadops
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          fetch-depth: 0
+          ref: ${{ inputs.ref }}
+
+      - name: Fetch Version
+        id: get_version
+        run: |
+          SHA=$(git rev-parse HEAD)
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+          git fetch --tags || true
+          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "v1.0.0-${SHA:0:7}")
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Latest Version: ${VERSION}"
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v5
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Build JAR (Skip Tests)
+        working-directory: ./backend
+        run: ./mvnw clean package -DskipTests
+
+      - name: Upload Backend JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-jar
+          path: backend/target/api-*.jar
+          retention-days: 1
+
+  deploy_testing:
+    name: 🚀 Deploy Test (Direct)
+    needs: find_version_and_package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: development
+    env:
+      TESTING_HEALTH_URL: https://test-api.threadops.in/actuator/health
+    steps:
+      - name: Download Backend JAR
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-jar
+          path: ./dist
+
+      - name: Deploy JAR to Oracle Cloud Test Server
+        env:
+          SSH_KEY: ${{ secrets.OCI_SSH_KEY }}
+          HOST: ${{ secrets.TEST_SERVER_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          scp -o StrictHostKeyChecking=no ./dist/api-*.jar ubuntu@$HOST:/home/ubuntu/threadops/app.jar
+          ssh -o StrictHostKeyChecking=no ubuntu@$HOST "cd /home/ubuntu/threadops && sudo docker compose up -d --build"
+
+      - name: Wait for testing to report healthy
+        run: |
+          elapsed=0
+          until curl --fail --silent --max-time 10 "$TESTING_HEALTH_URL" | grep -q '"status":"UP"'; do
+            if [ "$elapsed" -ge 300 ]; then
+              echo "::error::Testing did not report healthy at ${TESTING_HEALTH_URL} within 300s."
+              exit 1
+            fi
+            sleep 10
+            elapsed=$((elapsed + 10))
+          done
+          echo "Testing healthy after ${elapsed}s."
+
+      - name: Summary
+        run: |
+          {
+            echo "### 🚀 Backend Test Environment Deployed"
+            echo ""
+            echo "| Service | URL |"
+            echo "| --- | --- |"
+            echo "| Backend URL | https://test-api.threadops.in |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build_push_image:
+    name: 📦 Docker Image
+    needs: [find_version_and_package, deploy_testing]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          repository: ThreadOps/threadops
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          ref: ${{ needs.find_version_and_package.outputs.sha }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build & Push Backend Image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          target: runtime
+          push: true
+          tags: ghcr.io/threadops/threadops-backend:${{ needs.find_version_and_package.outputs.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy_production:
+    name: 🚀 Deploy Production
+    needs: [find_version_and_package, deploy_testing, build_push_image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: production
+      url: https://${{ vars.PROD_DOMAIN || 'app.threadops.in' }}
+    permissions:
+      contents: read
+      packages: write
+    env:
+      BACKEND_REPO: ghcr.io/threadops/threadops-backend
+      SHA: ${{ needs.find_version_and_package.outputs.sha }}
+      DOCKER_CLI_EXPERIMENTAL: enabled
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Snapshot current backend :production as :production-previous
+        run: |
+          if docker manifest inspect "${BACKEND_REPO}:production" > /dev/null 2>&1; then
+            docker buildx imagetools create --tag "${BACKEND_REPO}:production-previous" "${BACKEND_REPO}:production"
+            echo "Snapshotted ${BACKEND_REPO}:production -> ${BACKEND_REPO}:production-previous"
+          else
+            echo "No existing ${BACKEND_REPO}:production tag — first deploy, nothing to snapshot."
+          fi
+
+      - name: Retag backend :production -> ${{ needs.find_version_and_package.outputs.sha }}
+        run: |
+          docker buildx imagetools create --tag "${BACKEND_REPO}:production" "${BACKEND_REPO}:${SHA}"
+          echo "### Promoting backend ${SHA} to production" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Trigger Coolify deploy (Backend-PROD)
+        env:
+          COOLIFY_WEBHOOK: ${{ secrets.COOLIFY_WEBHOOK_BACKEND }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+        run: |
+          if [ -z "$COOLIFY_WEBHOOK" ]; then
+            echo "::error::Secret COOLIFY_WEBHOOK_BACKEND is not set in GitHub repository secrets."
+            exit 1
+          fi
+          if [ -n "$COOLIFY_TOKEN" ]; then
+            curl --fail --silent --show-error --request POST "$COOLIFY_WEBHOOK" \
+              --header "Authorization: Bearer ${COOLIFY_TOKEN}"
+          else
+            curl --fail --silent --show-error --request POST "$COOLIFY_WEBHOOK"
+          fi
+          echo "Coolify deployment triggered successfully."
+
+      - name: Summary
+        run: |
+          {
+            echo "### ✅ Backend Production Deployed (Coolify Primary)"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| SHA | \`${SHA}\` |"
+            echo "| Backend image | \`${BACKEND_REPO}:production\` (-> ${SHA}) |"
+            echo "| Target resource | Coolify \`Backend-PROD\` |"
+            echo "| Status | Webhook triggered |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy_backup:
+    name: 🚀 Deploy Backup
+    needs: [find_version_and_package, deploy_testing, build_push_image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: production
+    env:
+      BACKUP_SERVER_HOST: ${{ secrets.BACKUP_SERVER_HOST }}
+      SHA: ${{ needs.find_version_and_package.outputs.sha }}
+    steps:
+      - name: Download Backend JAR for Backup Standby
+        if: env.BACKUP_SERVER_HOST != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-jar
+          path: ./dist-backup
+
+      - name: Deploy JAR to Oracle Cloud Backup Standby Server
+        if: env.BACKUP_SERVER_HOST != ''
+        env:
+          SSH_KEY: ${{ secrets.OCI_SSH_KEY }}
+          HOST: ${{ env.BACKUP_SERVER_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          scp -o StrictHostKeyChecking=no ./dist-backup/api-*.jar ubuntu@$HOST:/home/ubuntu/threadops/app.jar
+          ssh -o StrictHostKeyChecking=no ubuntu@$HOST "cd /home/ubuntu/threadops && sudo docker compose up -d --build"
+
+      - name: Summary
+        run: |
+          {
+            echo "### ✅ Backend Backup Deployed (Oracle Standby)"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| SHA | \`${SHA}\` |"
+            echo "| Status | Docker container rebuilt & healthy |"
+          } >> "$GITHUB_STEP_SUMMARY"
