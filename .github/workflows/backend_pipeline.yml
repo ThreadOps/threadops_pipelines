@@ -20,7 +20,7 @@ jobs:
       sha: ${{ steps.get_version.outputs.sha }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ThreadOps/threadops
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
@@ -43,7 +43,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ThreadOps/threadops
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
@@ -100,7 +100,7 @@ jobs:
       TESTING_HEALTH_URL: https://test-api.threadops.in/actuator/health
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ThreadOps/threadops
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
@@ -159,7 +159,7 @@ jobs:
       packages: write
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ThreadOps/threadops
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
