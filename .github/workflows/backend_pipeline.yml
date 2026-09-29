@@ -82,6 +82,13 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+      - name: Upload Backend JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-jar
+          path: backend/target/api-*.jar
+          retention-days: 1
+
   deploy_testing:
     name: 🚀 Deploy Test
     needs: [find_latest_version, test_and_coverage]
@@ -90,7 +97,7 @@ jobs:
     timeout-minutes: 15
     environment: development
     env:
-      TESTING_HEALTH_URL: https://threadops-cebn.onrender.com/actuator/health
+      TESTING_HEALTH_URL: https://test-api.threadops.in/actuator/health
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -98,15 +105,33 @@ jobs:
           repository: ThreadOps/threadops
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           ref: ${{ needs.find_latest_version.outputs.sha }}
-      - name: Trigger Render Deploy (Backend Testing)
-        env:
-          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
-        run: |
-          if [ -z "$RENDER_DEPLOY_HOOK" ]; then
-            echo "::error::Secret RENDER_DEPLOY_HOOK is not set in GitHub Environment 'development'."
-            exit 1
-          fi
-          curl --fail --silent --show-error "$RENDER_DEPLOY_HOOK"
+
+      - name: Download Backend JAR
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-jar
+          path: ./dist
+
+      - name: Copy JAR to Oracle Cloud Test Server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.TEST_SERVER_HOST }}
+          username: ubuntu
+          key: ${{ secrets.OCI_SSH_KEY }}
+          source: "./dist/api-*.jar"
+          target: "/home/ubuntu/threadops/app.jar"
+          strip_components: 1
+
+      - name: Restart Backend on Test Server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.TEST_SERVER_HOST }}
+          username: ubuntu
+          key: ${{ secrets.OCI_SSH_KEY }}
+          script: |
+            cd /home/ubuntu/threadops
+            sudo docker compose up -d --build
+
       - name: Wait for testing to report healthy
         run: |
           elapsed=0
@@ -119,6 +144,7 @@ jobs:
             elapsed=$((elapsed + 10))
           done
           echo "Testing healthy after ${elapsed}s."
+
       - name: Summary
         run: |
           {
@@ -126,7 +152,7 @@ jobs:
             echo ""
             echo "| Service | URL |"
             echo "| --- | --- |"
-            echo "| Backend URL (Render) | https://threadops-cebn.onrender.com |"
+            echo "| Backend URL | https://test-api.threadops.in |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   build_push_image:
