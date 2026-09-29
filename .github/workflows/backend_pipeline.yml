@@ -212,8 +212,8 @@ jobs:
       - name: Gate Approved
         run: echo "Production deployment approved. Deploying to Primary VPS and Standby Backup in parallel."
 
-  deploy_prod_primary:
-    name: 🚀 Deploy Prod #1 (Primary VPS)
+  deploy_production:
+    name: 🚀 Deploy Production
     needs: [find_latest_version, production_gate, build_push_image]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -269,7 +269,7 @@ jobs:
       - name: Summary
         run: |
           {
-            echo "### ✅ Backend Production #1 (Coolify Primary) Deployed"
+            echo "### ✅ Backend Production Deployed (Coolify Primary)"
             echo ""
             echo "| Field | Value |"
             echo "| --- | --- |"
@@ -279,8 +279,8 @@ jobs:
             echo "| Status | Webhook triggered |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  deploy_prod_backup:
-    name: 🚀 Deploy Prod #2 (Standby Backup)
+  deploy_backup:
+    name: 🚀 Deploy Backup
     needs: [find_latest_version, production_gate, test_and_coverage]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -320,7 +320,7 @@ jobs:
       - name: Summary
         run: |
           {
-            echo "### ✅ Backend Production #2 (Standby Backup) Deployed"
+            echo "### ✅ Backend Backup Deployed (Oracle Standby)"
             echo ""
             echo "| Field | Value |"
             echo "| --- | --- |"
