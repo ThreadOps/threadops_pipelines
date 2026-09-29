@@ -21,7 +21,7 @@ jobs:
       sha: ${{ steps.get_version.outputs.sha }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ThreadOps/threadops
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
@@ -44,7 +44,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ThreadOps/threadops
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
@@ -71,7 +71,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ThreadOps/threadops
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
@@ -122,7 +122,7 @@ jobs:
   #
   #   steps:
   #     - name: Checkout Code
-  #       uses: actions/checkout@v4
+  #       uses: actions/checkout@v7
   #       with:
   #         ref: ${{ github.ref }}
   #
@@ -254,7 +254,7 @@ jobs:
     environment: development
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ThreadOps/threadops
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
@@ -304,7 +304,7 @@ jobs:
       packages: write
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ThreadOps/threadops
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
@@ -360,7 +360,7 @@ jobs:
       DOCKER_CLI_EXPERIMENTAL: enabled
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ThreadOps/threadops
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
