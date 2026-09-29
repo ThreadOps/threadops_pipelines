@@ -190,24 +190,15 @@ jobs:
             echo "against the \`production\` environment before this SHA goes live."
           } >> "$GITHUB_STEP_SUMMARY"
 
-  production_gate:
-    name: 🛡️ Production Approval Gate
+  deploy_production:
+    name: 🚀 Deploy Production
     needs: [find_latest_version, test_and_coverage, deploy_testing, build_push_image]
     if: (github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 1440
+    timeout-minutes: 10
     environment:
       name: production
       url: https://${{ vars.PROD_DOMAIN || 'app.threadops.in' }}
-    steps:
-      - name: Gate Approved
-        run: echo "Production deployment approved. Deploying to Primary VPS and Standby Backup in parallel."
-
-  deploy_production:
-    name: 🚀 Deploy Production
-    needs: [find_latest_version, production_gate, build_push_image]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
     permissions:
       contents: read
       packages: write
@@ -272,11 +263,14 @@ jobs:
 
   deploy_backup:
     name: 🚀 Deploy Backup
-    needs: [find_latest_version, production_gate, test_and_coverage]
+    needs: [find_latest_version, test_and_coverage, deploy_testing, build_push_image]
+    if: (github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment:
+      name: production
     env:
-      BACKUP_SERVER_HOST: ${{ secrets.BACKUP_SERVER_HOST || vars.BACKUP_SERVER_HOST || '129.225.95.28' }}
+      BACKUP_SERVER_HOST: ${{ secrets.BACKUP_SERVER_HOST }}
       SHA: ${{ needs.find_latest_version.outputs.sha }}
     steps:
       - name: Download Backend JAR for Backup Standby
@@ -306,6 +300,5 @@ jobs:
             echo "| Field | Value |"
             echo "| --- | --- |"
             echo "| SHA | \`${SHA}\` |"
-            echo "| Host | \`${BACKUP_SERVER_HOST}\` |"
             echo "| Status | Docker container rebuilt & healthy |"
           } >> "$GITHUB_STEP_SUMMARY"
