@@ -112,25 +112,16 @@ jobs:
           name: backend-jar
           path: ./dist
 
-      - name: Copy JAR to Oracle Cloud Test Server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.TEST_SERVER_HOST }}
-          username: ubuntu
-          key: ${{ secrets.OCI_SSH_KEY }}
-          source: "./dist/api-*.jar"
-          target: "/home/ubuntu/threadops/app.jar"
-          strip_components: 1
-
-      - name: Restart Backend on Test Server
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.TEST_SERVER_HOST }}
-          username: ubuntu
-          key: ${{ secrets.OCI_SSH_KEY }}
-          script: |
-            cd /home/ubuntu/threadops
-            sudo docker compose up -d --build
+      - name: Deploy JAR to Oracle Cloud Test Server
+        env:
+          SSH_KEY: ${{ secrets.OCI_SSH_KEY }}
+          HOST: ${{ secrets.TEST_SERVER_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          scp -o StrictHostKeyChecking=no ./dist/api-*.jar ubuntu@$HOST:/home/ubuntu/threadops/app.jar
+          ssh -o StrictHostKeyChecking=no ubuntu@$HOST "cd /home/ubuntu/threadops && sudo docker compose up -d --build"
 
       - name: Wait for testing to report healthy
         run: |
@@ -295,27 +286,17 @@ jobs:
           name: backend-jar
           path: ./dist-backup
 
-      - name: Copy JAR to Oracle Cloud Backup Standby Server
+      - name: Deploy JAR to Oracle Cloud Backup Standby Server
         if: env.BACKUP_SERVER_HOST != ''
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ env.BACKUP_SERVER_HOST }}
-          username: ubuntu
-          key: ${{ secrets.OCI_SSH_KEY }}
-          source: "./dist-backup/api-*.jar"
-          target: "/home/ubuntu/threadops/app.jar"
-          strip_components: 1
-
-      - name: Restart Backend on Backup Standby Server
-        if: env.BACKUP_SERVER_HOST != ''
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ env.BACKUP_SERVER_HOST }}
-          username: ubuntu
-          key: ${{ secrets.OCI_SSH_KEY }}
-          script: |
-            cd /home/ubuntu/threadops
-            sudo docker compose up -d --build
+        env:
+          SSH_KEY: ${{ secrets.OCI_SSH_KEY }}
+          HOST: ${{ env.BACKUP_SERVER_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          scp -o StrictHostKeyChecking=no ./dist-backup/api-*.jar ubuntu@$HOST:/home/ubuntu/threadops/app.jar
+          ssh -o StrictHostKeyChecking=no ubuntu@$HOST "cd /home/ubuntu/threadops && sudo docker compose up -d --build"
 
       - name: Summary
         run: |
