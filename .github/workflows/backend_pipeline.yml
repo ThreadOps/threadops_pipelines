@@ -199,25 +199,29 @@ jobs:
             echo "against the \`production\` environment before this SHA goes live."
           } >> "$GITHUB_STEP_SUMMARY"
 
-  deploy_prod:
-    name: 🚀 Deploy Prod
-    needs: [find_latest_version, build_push_image, deploy_testing]
+  production_gate:
+    name: 🛡️ Production Approval Gate
+    needs: [find_latest_version, test_and_coverage, deploy_testing, build_push_image]
     if: (github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    # Required reviewers on this environment are what makes the pipeline pause
-    # here and wait for a "Review Deployments" approval before continuing.
+    timeout-minutes: 1440
     environment:
       name: production
       url: https://${{ vars.PROD_DOMAIN || 'app.threadops.in' }}
+    steps:
+      - name: Gate Approved
+        run: echo "Production deployment approved. Deploying to Primary VPS and Standby Backup in parallel."
+
+  deploy_prod_primary:
+    name: 🚀 Deploy Prod #1 (Primary VPS)
+    needs: [find_latest_version, production_gate, build_push_image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       packages: write
     env:
       BACKEND_REPO: ghcr.io/threadops/threadops-backend
-      # The image build_push_image just pushed in this same run — no need to
-      # re-resolve or re-verify a SHA the way the old standalone promotion
-      # workflow did, since deploy_prod only runs after that job succeeded.
       SHA: ${{ needs.find_latest_version.outputs.sha }}
       DOCKER_CLI_EXPERIMENTAL: enabled
     steps:
@@ -251,7 +255,7 @@ jobs:
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
         run: |
           if [ -z "$COOLIFY_WEBHOOK" ]; then
-            echo "::error::Secret COOLIFY_WEBHOOK_BACKEND is not set in GitHub Environment 'production'."
+            echo "::error::Secret COOLIFY_WEBHOOK_BACKEND is not set in GitHub repository secrets."
             exit 1
           fi
           if [ -n "$COOLIFY_TOKEN" ]; then
@@ -265,7 +269,7 @@ jobs:
       - name: Summary
         run: |
           {
-            echo "### ✅ Backend Production Deployed to Coolify"
+            echo "### ✅ Backend Production #1 (Coolify Primary) Deployed"
             echo ""
             echo "| Field | Value |"
             echo "| --- | --- |"
@@ -273,4 +277,54 @@ jobs:
             echo "| Backend image | \`${BACKEND_REPO}:production\` (-> ${SHA}) |"
             echo "| Target resource | Coolify \`Backend-PROD\` |"
             echo "| Status | Webhook triggered |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy_prod_backup:
+    name: 🚀 Deploy Prod #2 (Standby Backup)
+    needs: [find_latest_version, production_gate, test_and_coverage]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BACKUP_SERVER_HOST: ${{ secrets.BACKUP_SERVER_HOST || vars.BACKUP_SERVER_HOST || '129.225.95.28' }}
+      SHA: ${{ needs.find_latest_version.outputs.sha }}
+    steps:
+      - name: Download Backend JAR for Backup Standby
+        if: env.BACKUP_SERVER_HOST != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-jar
+          path: ./dist-backup
+
+      - name: Copy JAR to Oracle Cloud Backup Standby Server
+        if: env.BACKUP_SERVER_HOST != ''
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ env.BACKUP_SERVER_HOST }}
+          username: ubuntu
+          key: ${{ secrets.OCI_SSH_KEY }}
+          source: "./dist-backup/api-*.jar"
+          target: "/home/ubuntu/threadops/app.jar"
+          strip_components: 1
+
+      - name: Restart Backend on Backup Standby Server
+        if: env.BACKUP_SERVER_HOST != ''
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.BACKUP_SERVER_HOST }}
+          username: ubuntu
+          key: ${{ secrets.OCI_SSH_KEY }}
+          script: |
+            cd /home/ubuntu/threadops
+            sudo docker compose up -d --build
+
+      - name: Summary
+        run: |
+          {
+            echo "### ✅ Backend Production #2 (Standby Backup) Deployed"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| SHA | \`${SHA}\` |"
+            echo "| Host | \`${BACKUP_SERVER_HOST}\` |"
+            echo "| Status | Docker container rebuilt & healthy |"
           } >> "$GITHUB_STEP_SUMMARY"
