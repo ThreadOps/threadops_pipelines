@@ -59,7 +59,7 @@ jobs:
         run: ./mvnw verify
       - name: Upload Surefire Reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-surefire-reports
           path: backend/target/surefire-reports/
@@ -67,7 +67,7 @@ jobs:
           if-no-files-found: ignore
       - name: Upload Failsafe Reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-failsafe-reports
           path: backend/target/failsafe-reports/
@@ -75,7 +75,7 @@ jobs:
           if-no-files-found: ignore
       - name: Upload JaCoCo Coverage Report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-jacoco-report
           path: backend/target/site/jacoco/
@@ -83,7 +83,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Upload Backend JAR
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-jar
           path: backend/target/api-*.jar
