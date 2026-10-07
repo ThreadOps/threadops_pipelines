@@ -88,19 +88,20 @@ jobs:
           printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           scp -o StrictHostKeyChecking=no ./dist/api-*.jar ubuntu@$HOST:/home/ubuntu/threadops/app.jar
-          ssh -o StrictHostKeyChecking=no ubuntu@$HOST '
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=15 -o ServerAliveCountMax=8 ubuntu@$HOST '
             cd /home/ubuntu/threadops
             sudo docker compose up -d --build
             echo "Waiting for backend to report healthy..."
             elapsed=0
             until sudo docker exec threadops-caddy wget -qO- http://backend:8080/actuator/health 2>/dev/null | grep -q "UP"; do
-              if [ $elapsed -ge 300 ]; then
-                echo "::error::Backend did not report UP within 300s."
+              if [ $elapsed -ge 480 ]; then
+                echo "::error::Backend did not report UP within 480s."
                 sudo docker logs --tail 50 threadops-backend
                 exit 1
               fi
               sleep 10
               elapsed=$((elapsed + 10))
+              echo "  still starting... ${elapsed}s"
             done
             echo "Backend is healthy after ${elapsed}s."
           '
@@ -222,7 +223,7 @@ jobs:
     name: 🚀 Deploy Backup
     needs: [find_version_and_package, deploy_testing, build_push_image]
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     environment:
       name: production
     env:
@@ -246,19 +247,20 @@ jobs:
           printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           scp -o StrictHostKeyChecking=no ./dist-backup/api-*.jar ubuntu@$HOST:/home/ubuntu/threadops/app.jar
-          ssh -o StrictHostKeyChecking=no ubuntu@$HOST '
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=15 -o ServerAliveCountMax=8 ubuntu@$HOST '
             cd /home/ubuntu/threadops
             sudo docker compose up -d --build
             echo "Waiting for backup backend to report healthy..."
             elapsed=0
             until sudo docker exec threadops-caddy wget -qO- http://backend:8080/actuator/health 2>/dev/null | grep -q "UP"; do
-              if [ $elapsed -ge 300 ]; then
-                echo "::error::Backup backend did not report UP within 300s."
+              if [ $elapsed -ge 480 ]; then
+                echo "::error::Backup backend did not report UP within 480s."
                 sudo docker logs --tail 50 threadops-backend
                 exit 1
               fi
               sleep 10
               elapsed=$((elapsed + 10))
+              echo "  still starting... ${elapsed}s"
             done
             echo "Backup backend is healthy after ${elapsed}s."
           '
